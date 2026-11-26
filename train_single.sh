@@ -5,7 +5,7 @@
 #   DEXHAND=inspire bash train_single.sh raw f8           # dd, inspire
 #   DEXHAND=inspire METHOD=ours bash train_single.sh raw  # ours, inspire
 # Env overrides: DEXHAND=artimano|inspire|shadow|allegro  METHOD=dd|ours  CLIPS="22 841 2100"
-#                EPOCHS=3000  NUM_ENVS=4096  SEED=42  PID=0|1 (PID wrist control; run names get _pid)
+#                EPOCHS=1000  NUM_ENVS=4096  SEED=42  PID=0|1 (PID wrist control; run names get _pid)
 #                WS=<x> wrist force/torque multiplier (default 2 for shadow, else ManipTrans 1)  TAG=<suffix>
 # Pick the GPU with a prefix:  CUDA_VISIBLE_DEVICES=2 DEXHAND=inspire bash train_single.sh raw f8
 set -e
@@ -17,7 +17,7 @@ LABS=("$@")
 CLIPS=${CLIPS:-"22 841 2100"}
 METHOD=${METHOD:-dd}
 DEXHAND=${DEXHAND:-artimano}
-EPOCHS=${EPOCHS:-3000}
+EPOCHS=${EPOCHS:-1000}
 NUM_ENVS=${NUM_ENVS:-4096}
 SEED=${SEED:-42}
 PID=${PID:-0}
