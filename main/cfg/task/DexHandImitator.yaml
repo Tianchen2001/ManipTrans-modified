@@ -6,6 +6,8 @@ seed: ${..seed}
 
 # if given, will override the device setting in gym.
 env:
+  testScaleFactor: 1.0
+
   numEnvs: ${resolve_default:8192,${...num_envs}}
   dexhand: ${...dexhand}
 

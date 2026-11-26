@@ -164,6 +164,7 @@ def launch_rlg_hydra(cfg: DictConfig):
                 envs,
                 n_parallel_recorders=cfg.n_parallel_recorders,
                 n_successful_videos_to_record=cfg.n_successful_videos_to_record,
+                out_dir=os.path.join("videos", cfg.experiment or "test"),
             )
         return envs
 

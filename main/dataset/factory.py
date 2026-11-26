@@ -42,6 +42,8 @@ class ManipDataFactory:
 
         if type(index) == str and "@" in index:
             dtype = "oakink2"
+        elif type(index) == str and index.startswith("h"):
+            dtype = "handonly"
         elif type(index) == str and index.startswith("g"):
             dtype = "grabdemo"
         elif type(index) == str and index.startswith("v"):

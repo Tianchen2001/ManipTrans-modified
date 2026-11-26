@@ -172,6 +172,64 @@ class DexHandImitatorRHEnv(VecTask):
         # Refresh tensors
         self._refresh()
 
+        # >>> first-episode evaluator (EVAL_OUT)
+        self._eval_out = os.environ.get("EVAL_OUT", "") if not self.training else ""
+        if self._eval_out:
+            n, dev = self.num_envs, self.device
+            self._eval_done = torch.zeros(n, dtype=torch.bool, device=dev)
+            self._eval_success = torch.zeros(n, dtype=torch.bool, device=dev)
+            self._eval_end_frame = torch.zeros(n, dtype=torch.long, device=dev)
+            self._eval_steps = torch.zeros(n, dtype=torch.long, device=dev)
+            self._eval_rew = torch.zeros(n, dtype=torch.float, device=dev)
+            self._eval_terms = {}
+            # >>> eval_patch3: per-frame recorder for the scale sweep
+            self._eval_frames = {} if os.environ.get("EVAL_FRAMES", "0") == "1" else None
+            self._eval_f_prev = None
+            # >>> eval_patch4: camera recording of env 0
+            self._eval_render = (os.environ.get("EVAL_RENDER", "0") == "1"
+                                 and getattr(self, "camera_obs", None) is not None and len(self.camera_obs) > 0)
+            self._eval_rframes = []
+            if self._eval_render:
+                import math
+                wp = self.demo_data["wrist_pos"][0][: int(self.demo_data["seq_len"][0])].float().cpu().numpy()
+                lo, hi = wp.min(0), wp.max(0)
+                ctr = (lo + hi) / 2
+                ext = float(np.linalg.norm(hi - lo)) + 0.35                 # + hand size
+                az, el = [math.radians(float(v)) for v in os.environ.get("EVAL_CAM", "0,30").split(",")]
+                vfov = 2 * math.atan(math.tan(math.radians(69.4) / 2) * 720 / 1280)
+                dist = ext / 2 / math.tan(vfov / 2) * 1.05
+                eye = ctr + dist * np.array([math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)])
+                self.gym.set_camera_location(self.camera_handlers[0], self.envs[0],
+                                             gymapi.Vec3(*[float(v) for v in eye]), gymapi.Vec3(*[float(v) for v in ctr]))
+                print(f"[eval] recording env 0 camera, center {ctr.round(3)}, distance {dist:.2f} m")
+                # hide the table (own collision group -> no effect on the physics); EVAL_RENDER_TABLE=1 keeps it
+                if os.environ.get("EVAL_RENDER_TABLE", "0") != "1":
+                    ids = []
+                    for ei, env in enumerate(self.envs):
+                        h = self.gym.find_actor_handle(env, "table")
+                        if h >= 0:
+                            self._root_state[ei, h, 2] = -10.0
+                            ids.append(ei)
+                    if ids:
+                        # full (non-indexed) write: an indexed call here would replace the pending indexed root-state write
+                        # of the initial reset_idx (IsaacGym applies only the last indexed call before a sim step)
+                        self.gym.set_actor_root_state_tensor(self.sim, gymtorch.unwrap_tensor(self._root_state))
+                    print(f"[eval] table hidden in {len(ids)} envs")
+            # <<< eval_patch4
+            # <<< eval_patch3
+            # >>> eval_patch2: physical-unit metrics + rollout dump
+            self._eval_x = {k: torch.zeros(n, device=dev) for k in (
+                "power_joint_W", "power_wrist_W", "err_tip_mm", "err_kp_mm", "err_wrist_pos_mm",
+                "err_wrist_rot_deg", "jerk_tip", "jerk_wrist", "action_rate")}
+            self._eval_xcnt = {k: torch.zeros(n, device=dev) for k in ("jerk", "action")}
+            self._eval_hist = []            # last 3 (tips [n,5,3], wrist [n,3]) for jerk
+            self._eval_prev_act = None
+            self._eval_traj_k = min(int(os.environ.get("EVAL_TRAJ_ENVS", "4")), n)
+            self._eval_traj = {k: [] for k in ("wrist_pos", "wrist_quat", "kp", "kp_ref", "wrist_ref", "rb", "alive")}
+            # <<< eval_patch2
+            print(f"[eval] first-episode evaluator on, {n} envs -> {self._eval_out}")
+        # <<<
+
     def create_sim(self):
         self.sim_params.up_axis = gymapi.UP_AXIS_Z
         self.sim_params.gravity.x = 0
@@ -614,7 +672,7 @@ class DexHandImitatorRHEnv(VecTask):
             else:
                 scale_factor = 1.0
         else:
-            scale_factor = 1.0
+            scale_factor = float(self.cfg["env"].get("testScaleFactor", 1.0)) # 1.0
 
         assert not self.headless or isinstance(compute_imitation_reward, torch.jit.ScriptFunction)
 
@@ -632,6 +690,140 @@ class DexHandImitatorRHEnv(VecTask):
             )
         )
         self.total_rew_buf += self.rew_buf
+
+        # >>> first-episode evaluator (EVAL_OUT)
+        if self._eval_out:
+            act = ~self._eval_done
+            self._eval_rew[act] += self.rew_buf[act].detach()
+            self._eval_steps[act] += 1
+            for k, v in self.reward_dict.items():
+                if k not in self._eval_terms:
+                    self._eval_terms[k] = torch.zeros(self.num_envs, device=self.device)
+                self._eval_terms[k][act] += v[act].detach()
+            # >>> eval_patch2
+            with torch.no_grad():
+                X, af = self._eval_x, act.float()
+                wh = self.dexhand_handles[self.dexhand.to_dex("wrist")[0]]
+                bs = self.states["base_state"]
+                p_joint = torch.abs(self.dof_force * self.states["dq"]).sum(-1)
+                p_wrist = torch.abs((self.apply_forces[:, wh, :] * bs[:, 7:10]).sum(-1)) + \
+                          torch.abs((self.apply_torque[:, wh, :] * bs[:, 10:13]).sum(-1))
+                kp = self.states["joints_state"][:, 1:, :3]
+                kp_ref = target_state["joints_pos"]
+                dist = torch.norm(kp - kp_ref, dim=-1)                                   # [n, K]
+                tip_idx = [i - 1 for t in ("thumb_tip", "index_tip", "middle_tip", "ring_tip", "pinky_tip")
+                           for i in self.dexhand.weight_idx[t]]
+                dq_ = quat_mul(target_state["wrist_quat"], quat_conjugate(bs[:, 3:7]))
+                rot_deg = torch.rad2deg(2 * torch.acos(torch.clamp(torch.abs(dq_[:, 3]), max=1.0)))
+                X["power_joint_W"] += p_joint * af
+                X["power_wrist_W"] += p_wrist * af
+                X["err_tip_mm"] += 1000 * dist[:, tip_idx].mean(-1) * af
+                X["err_kp_mm"] += 1000 * dist.mean(-1) * af
+                X["err_wrist_pos_mm"] += 1000 * torch.norm(target_state["wrist_pos"] - bs[:, :3], dim=-1) * af
+                X["err_wrist_rot_deg"] += rot_deg * af
+                cdt = self.dt * getattr(self, "control_freq_inv", 1)
+                tips, wpos = kp[:, tip_idx].clone(), bs[:, :3].clone()
+                if len(self._eval_hist) == 3:
+                    (t3, w3), (t2, w2), (t1, w1) = self._eval_hist
+                    jt = torch.norm(tips - 3 * t1 + 3 * t2 - t3, dim=-1).mean(-1) / cdt ** 3
+                    jw = torch.norm(wpos - 3 * w1 + 3 * w2 - w3, dim=-1) / cdt ** 3
+                    X["jerk_tip"] += jt * af; X["jerk_wrist"] += jw * af; self._eval_xcnt["jerk"] += af
+                self._eval_hist = (self._eval_hist + [(tips, wpos)])[-3:]
+                a_now = self.curr_targets.detach().clone()
+                if self._eval_prev_act is not None:
+                    X["action_rate"] += torch.norm(a_now - self._eval_prev_act, dim=-1) * af
+                    self._eval_xcnt["action"] += af
+                self._eval_prev_act = a_now
+                K = self._eval_traj_k
+                if K > 0:
+                    T_ = self._eval_traj
+                    T_["wrist_pos"].append(bs[:K, :3].cpu()); T_["wrist_quat"].append(bs[:K, 3:7].cpu())
+                    T_["kp"].append(kp[:K].cpu()); T_["kp_ref"].append(kp_ref[:K].cpu())
+                    T_["wrist_ref"].append(target_state["wrist_pos"][:K].cpu())
+                    T_["rb"].append(self._rigid_body_state[:K].cpu()); T_["alive"].append(act[:K].cpu())
+            # <<< eval_patch2
+            # >>> eval_patch3
+            if self._eval_frames is not None:
+                with torch.no_grad():
+                    W = self.dexhand.weight_idx
+                    keys = ("thumb_tip", "index_tip", "middle_tip", "pinky_tip", "ring_tip",
+                            "level_1_joints", "level_2_joints")
+                    base = (0.04, 0.045, 0.05, 0.06, 0.06, 0.07, 0.08)        # thresholds = base / 0.7 * scale
+                    ratio = torch.stack([dist[:, [i - 1 for i in W[k]]].mean(-1) / (b / 0.7)
+                                         for k, b in zip(keys, base)], -1)
+                    nan = torch.full_like(p_joint, float("nan"))
+                    jt_, jw_ = locals().get("jt"), locals().get("jw")
+                    ar_ = nan if self._eval_f_prev is None else torch.norm(a_now - self._eval_f_prev, dim=-1)
+                    self._eval_f_prev = a_now
+                    rec = {"ratio": ratio, "run": self.running_progress_buf.clone(), "alive": act.clone(),
+                           "m_power_joint_W": p_joint, "m_power_wrist_W": p_wrist,
+                           "m_err_tip_mm": 1000 * dist[:, tip_idx].mean(-1), "m_err_kp_mm": 1000 * dist.mean(-1),
+                           "m_err_wrist_pos_mm": 1000 * torch.norm(target_state["wrist_pos"] - bs[:, :3], dim=-1),
+                           "m_err_wrist_rot_deg": rot_deg,
+                           "m_jerk_tip": nan if jt_ is None else jt_, "m_jerk_wrist": nan if jw_ is None else jw_,
+                           "m_action_rate": ar_}
+                    for k, v in rec.items():
+                        self._eval_frames.setdefault(k, []).append(v.detach().cpu())
+            # <<< eval_patch3
+            # >>> eval_patch4
+            if self._eval_render and bool(act[0]):
+                self._eval_rframes.append(self.camera_obs[0][..., :3].clone().cpu().numpy())
+            # <<< eval_patch4
+            fin = act & self.reset_buf.bool()
+            self._eval_success[fin] = self.success_buf[fin].bool()
+            self._eval_end_frame[fin] = self.progress_buf[fin]
+            self._eval_done |= fin
+            if bool(self._eval_done.all()):
+                import json
+                T = int(self.demo_data["seq_len"].max())
+                steps = self._eval_steps.float().clamp(min=1)
+                res = {
+                    "num_envs": int(self.num_envs),
+                    "clip_len": T,
+                    "success_rate": float(self._eval_success.float().mean()),
+                    "frac_tracked_mean": float((self._eval_end_frame.float() / (T - 4)).clamp(max=1).mean()),
+                    "end_frame_mean": float(self._eval_end_frame.float().mean()),
+                    "end_frame_median": float(self._eval_end_frame.float().median()),
+                    "reward_per_step_mean": float((self._eval_rew / steps).mean()),
+                    # >>> eval_patch2
+                    **{f"x_{k}": float((v / (self._eval_xcnt["jerk"] if k.startswith("jerk") else
+                                             self._eval_xcnt["action"] if k == "action_rate" else
+                                             self._eval_steps.float()).clamp(min=1)).mean())
+                       for k, v in self._eval_x.items()},
+                    # <<< eval_patch2
+                    **{f"{k}_per_step_mean": float((v / steps).mean()) for k, v in self._eval_terms.items()},
+                }
+                os.makedirs(os.path.dirname(self._eval_out) or ".", exist_ok=True)
+                np.savez(self._eval_out + ".npz",
+                         success=self._eval_success.cpu().numpy(), end_frame=self._eval_end_frame.cpu().numpy(),
+                         steps=self._eval_steps.cpu().numpy(), reward=self._eval_rew.cpu().numpy(),
+                         **{k: v.cpu().numpy() for k, v in self._eval_terms.items()})
+                # >>> eval_patch2
+                np.savez(self._eval_out + "_x.npz", steps=self._eval_steps.cpu().numpy(),
+                         jerk_steps=self._eval_xcnt["jerk"].cpu().numpy(),
+                         **{k: v.cpu().numpy() for k, v in self._eval_x.items()})
+                if self._eval_traj_k > 0:
+                    np.savez(self._eval_out + "_traj.npz", fps=60, body_names=np.array(self.dexhand.body_names),
+                             body_rb_idx=np.array([self.dexhand_handles[b] for b in self.dexhand.body_names]),
+                             **{k: torch.stack(v, 0).numpy() for k, v in self._eval_traj.items()})
+                # <<< eval_patch2
+                # >>> eval_patch3
+                if self._eval_frames is not None:
+                    np.savez_compressed(self._eval_out + "_frames.npz", success=self._eval_success.cpu().numpy(),
+                                        end_frame=self._eval_end_frame.cpu().numpy(),
+                                        **{k: torch.stack(v, 0).numpy() for k, v in self._eval_frames.items()})
+                # <<< eval_patch3
+                # >>> eval_patch4
+                if self._eval_render and len(self._eval_rframes) > 0:
+                    import imageio
+                    imageio.mimsave(self._eval_out + "_render.mp4", self._eval_rframes, fps=60, macro_block_size=1)
+                    print(f"[eval] wrote {self._eval_out}_render.mp4 ({len(self._eval_rframes)} frames)")
+                # <<< eval_patch4
+                with open(self._eval_out + ".json", "w") as f:
+                    json.dump(res, f, indent=2)
+                print("[eval] " + json.dumps(res))
+                os._exit(0)
+        # <<<
 
     def compute_observations(self):
         self._refresh()
@@ -1004,8 +1196,12 @@ class DexHandImitatorRHEnv(VecTask):
             camera_cfg.horizontal_fov = 69.4
 
             camera = isaac_gym.create_camera_sensor(env, camera_cfg)
-            cam_pos = gymapi.Vec3(0.80, -0.00, 0.7)
-            cam_target = gymapi.Vec3(-1, -0.00, 0.3)
+            wp = self.demo_data["wrist_pos"].reshape(-1, 3)
+            c = wp.mean(0).cpu().numpy()
+            ext = float((wp.max(0).values - wp.min(0).values).max())
+            d = max(1.0, 1.6 * ext + 0.25)                     # back off enough to see the whole motion
+            cam_pos = gymapi.Vec3(c[0] + 0.7 * d, c[1] - 0.7 * d, c[2] + 0.45 * d)
+            cam_target = gymapi.Vec3(c[0], c[1], c[2])
             isaac_gym.set_camera_location(camera, env, cam_pos, cam_target)
         else:
             camera_cfg = gymapi.CameraProperties()

@@ -189,3 +189,13 @@ make*.py
 
 runs
 runs/*
+# ---- ManipTrans-modified ----
+logs/
+eval/
+vis/
+videos/
+*.npz
+*.mp4
+!run_*.sh
+!eval_all.sh
+!render_effort_all.sh
