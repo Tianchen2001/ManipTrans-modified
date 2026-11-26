@@ -31,7 +31,7 @@ mkdir -p $LOGDIR
 for d in $(ls -d runs/h_*__* 2>/dev/null | sort); do
   exp=$(basename "$d" | sed 's/__.*//')                 # h_dd_traj0_raw_shadow_pid
   pid=0; base=$exp
-  [[ $base =~ (_w[0-9.]+)$ ]] && base=${base%${BASH_REMATCH[1]}}    # tuning tag (TAG=_w3), see run_dd.sh
+  [[ $base =~ (_w[0-9.]+)$ ]] && base=${base%${BASH_REMATCH[1]}}    # tuning tag (TAG=_w3), see train_single.sh
   [[ $base == *_pid ]] && { pid=1; base=${base%_pid}; }
   hand=${base##*_}
   idx=${base%_${hand}}

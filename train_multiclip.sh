@@ -4,11 +4,11 @@
 # env i tracks clip i % N (ManipTrans dataIndices list). Run names: g_<method>_n<N>_s<seed>_<dexhand>.
 # Jobs run sequentially in the order of NS, then SEEDS, then METHODS (default: n40 s1 dd/ours, n40 s2, n40 s3,
 # then n20, n10); finished runs are skipped.
-#   bash run_gen.sh                                    # everything: dd+ours x 10,20,40 x seeds 1,2,3 on inspire
-#   METHODS=ours NS="10 20" SEEDS=1 bash run_gen.sh    # a subset (e.g. split over two GPUs / tmux windows)
+#   bash train_multiclip.sh                                    # everything: dd+ours x 10,20,40 x seeds 1,2,3 on inspire
+#   METHODS=ours NS="10 20" SEEDS=1 bash train_multiclip.sh    # a subset (e.g. split over two GPUs / tmux windows)
 # Env overrides: METHODS="dd ours"  NS="40 20 10"  SEEDS="1 2 3"  DEXHAND=inspire  EPOCHS=5000  NUM_ENVS=4096
-#                SPLITS=data/handonly/splits_gen  WS=<x> (as run_dd.sh)  TAG=<suffix>
-# Pick the GPU with a prefix:  CUDA_VISIBLE_DEVICES=2 bash run_gen.sh
+#                SPLITS=data/handonly/splits_gen  WS=<x> (as train_single.sh)  TAG=<suffix>
+# Pick the GPU with a prefix:  CUDA_VISIBLE_DEVICES=2 bash train_multiclip.sh
 set -u
 cd "$(dirname "$0")"
 export PYTHONPATH=$PWD${PYTHONPATH:+:$PYTHONPATH}
@@ -51,4 +51,4 @@ for n in $NS; do
     done
   done
 done
-echo "=== run_gen.sh finished $(date '+%m-%d %H:%M')"
+echo "=== train_multiclip.sh finished $(date '+%m-%d %H:%M')"

@@ -196,6 +196,8 @@ vis/
 videos/
 *.npz
 *.mp4
-!run_*.sh
+!train_*.sh
+!queue_*.sh
 !eval_all.sh
 !render_effort_all.sh
+.nfs*

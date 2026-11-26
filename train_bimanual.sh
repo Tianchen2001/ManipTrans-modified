@@ -1,6 +1,6 @@
 #!/bin/bash
 # Bimanual imitator with hand-hand collision (one policy for both hands).
-#   CUDA_VISIBLE_DEVICES=3 CLIPS="bseq1" METHOD=ours bash run_bih.sh raw
+#   CUDA_VISIBLE_DEVICES=3 CLIPS="bseq1" METHOD=ours bash train_bimanual.sh raw
 # Env: CLIPS  METHOD=dd|ours  DEXHAND=artimano  EPOCHS=1000  NUM_ENVS=4096  SEED=42  PID=0|1
 #      WS=<x> wrist force/torque multiplier (default 2 for shadow)  TAG=<run-name suffix>
 #      CONTACT_PAIRS=<n> PhysX max_gpu_contact_pairs (default 8388608 for shadow, else the task config value)
@@ -13,7 +13,7 @@ export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export PYTHONPATH=$PWD${PYTHONPATH:+:$PYTHONPATH}
 export LD_LIBRARY_PATH=$CONDA_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 LABS=("$@")
-[ ${#LABS[@]} -eq 0 ] && { echo "usage: bash run_bih.sh <lab> [<lab> ...]"; exit 1; }
+[ ${#LABS[@]} -eq 0 ] && { echo "usage: bash train_bimanual.sh <lab> [<lab> ...]"; exit 1; }
 CLIPS=${CLIPS:?set CLIPS, e.g. CLIPS=\"bseq1\"}
 METHOD=${METHOD:-dd}
 DEXHAND=${DEXHAND:-artimano}

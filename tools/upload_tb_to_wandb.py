@@ -7,7 +7,7 @@ x-axis = training iteration (`iter`); optionally only the first --max-iter itera
 
 Tags logged per iteration (".../iter") are used directly; tags logged only per frame (losses/*, info/*,
 performance/*) are mapped frame -> iteration with info/epochs. ".../step" and ".../time" duplicates are dropped.
-Name = run dir without timestamp and leading "h_"; group = <method>_<hand>[_pid] (as in run_dd.sh),
+Name = run dir without timestamp and leading "h_"; group = <method>_<hand>[_pid] (as in train_single.sh),
 tags = [lab, clip, task, hand]. Run id = <id-prefix><dir name without timestamp>, so re-running resumes the
 same wandb run (delete it on wandb first if you want a clean re-upload).
 Each successful upload leaves runs/<run>/.wandb_uploaded_<project>; such runs are skipped next time

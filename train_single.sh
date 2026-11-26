@@ -1,19 +1,19 @@
 #!/bin/bash
 # Sequentially train tracking policies for the given cutoff labels over all clips, on one dexhand.
 # One instance per tmux window; two instances share a GPU.
-#   bash run_dd.sh raw f12                          # dd, artimano
-#   DEXHAND=inspire bash run_dd.sh raw f8           # dd, inspire
-#   DEXHAND=inspire METHOD=ours bash run_dd.sh raw  # ours, inspire
+#   bash train_single.sh raw f12                          # dd, artimano
+#   DEXHAND=inspire bash train_single.sh raw f8           # dd, inspire
+#   DEXHAND=inspire METHOD=ours bash train_single.sh raw  # ours, inspire
 # Env overrides: DEXHAND=artimano|inspire|shadow|allegro  METHOD=dd|ours  CLIPS="22 841 2100"
 #                EPOCHS=3000  NUM_ENVS=4096  SEED=42  PID=0|1 (PID wrist control; run names get _pid)
 #                WS=<x> wrist force/torque multiplier (default 2 for shadow, else ManipTrans 1)  TAG=<suffix>
-# Pick the GPU with a prefix:  CUDA_VISIBLE_DEVICES=2 DEXHAND=inspire bash run_dd.sh raw f8
+# Pick the GPU with a prefix:  CUDA_VISIBLE_DEVICES=2 DEXHAND=inspire bash train_single.sh raw f8
 set -e
 cd "$(dirname "$0")"                                   # run from the ManipTrans root, wherever invoked
 export PYTHONPATH=$PWD${PYTHONPATH:+:$PYTHONPATH}       # lib/ main/ maniptrans_envs/ importable
 export LD_LIBRARY_PATH=$CONDA_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}   # libpython3.8 for isaacgym
 LABS=("$@")
-[ ${#LABS[@]} -eq 0 ] && { echo "usage: bash run_dd.sh <lab> [<lab> ...]   e.g. raw f12"; exit 1; }
+[ ${#LABS[@]} -eq 0 ] && { echo "usage: bash train_single.sh <lab> [<lab> ...]   e.g. raw f12"; exit 1; }
 CLIPS=${CLIPS:-"22 841 2100"}
 METHOD=${METHOD:-dd}
 DEXHAND=${DEXHAND:-artimano}
