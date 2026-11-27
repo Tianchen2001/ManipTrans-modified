@@ -198,6 +198,6 @@ videos/
 *.mp4
 !train_*.sh
 !queue_*.sh
-!eval_all.sh
+!eval_*.sh
 !render_effort_all.sh
 .nfs*

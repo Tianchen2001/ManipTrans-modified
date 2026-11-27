@@ -4,9 +4,9 @@
 # env i tracks clip i % N (ManipTrans dataIndices list). Run names: g_<method>_n<N>_s<seed>_<dexhand>.
 # Jobs run sequentially in the order of NS, then SEEDS, then METHODS (default: n40 s1 dd/ours, n40 s2, n40 s3,
 # then n20, n10); finished runs are skipped.
-#   bash train_multiclip.sh                                    # everything: dd+ours x 10,20,40 x seeds 1,2,3 on inspire
+#   bash train_multiclip.sh                                    # everything: dd+ours x 40,20,10 x seeds 1,2,3 on inspire, 1000 iterations
 #   METHODS=ours NS="10 20" SEEDS=1 bash train_multiclip.sh    # a subset (e.g. split over two GPUs / tmux windows)
-# Env overrides: METHODS="dd ours"  NS="40 20 10"  SEEDS="1 2 3"  DEXHAND=inspire  EPOCHS=5000  NUM_ENVS=4096
+# Env overrides: METHODS="dd ours"  NS="40 20 10"  SEEDS="1 2 3"  DEXHAND=inspire  EPOCHS=1000  NUM_ENVS=4096
 #                SPLITS=data/handonly/splits_gen  WS=<x> (as train_single.sh)  TAG=<suffix>
 # Pick the GPU with a prefix:  CUDA_VISIBLE_DEVICES=2 bash train_multiclip.sh
 set -u
@@ -17,7 +17,7 @@ METHODS=${METHODS:-"dd ours"}
 NS=${NS:-"40 20 10"}
 SEEDS=${SEEDS:-"1 2 3"}
 DEXHAND=${DEXHAND:-inspire}
-EPOCHS=${EPOCHS:-5000}
+EPOCHS=${EPOCHS:-1000}
 NUM_ENVS=${NUM_ENVS:-4096}
 SPLITS=${SPLITS:-data/handonly/splits_gen}
 EXTRA=""
